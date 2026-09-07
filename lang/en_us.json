@@ -1,0 +1,9 @@
+{
+  "not_available": "No weather source reachable",
+  "permission_denied": "Permission denied",
+  "timeout": "Request timed out",
+  "network_error": "Network error: {}",
+  "parse_error": "Parse error: {}",
+  "provider_failed": "Provider failed: {}",
+  "location_failed": "Could not determine location: {}"
+}

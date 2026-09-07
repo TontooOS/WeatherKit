@@ -1,0 +1,38 @@
+[package]
+name = "weatherkit"
+version = "26.1.0"
+edition = "2021"
+license = "TCL"
+description = "Weather framework for TontooOS - 20 keyless weather functions with fallback APIs, location via CoreLocation"
+authors = ["arlomu"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "weatherkit"
+path = "src/lib.rs"
+
+[[example]]
+name = "test_current"
+path = "examples/test_current.rs"
+
+[[example]]
+name = "test_forecast"
+path = "examples/test_forecast.rs"
+
+[[example]]
+name = "test_environment"
+path = "examples/test_environment.rs"
+
+[[example]]
+name = "test_astronomy"
+path = "examples/test_astronomy.rs"
+
+[dependencies]
+corelocation = { path = "../CoreLocation" }
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

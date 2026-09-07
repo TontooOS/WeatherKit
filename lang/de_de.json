@@ -1,0 +1,9 @@
+{
+  "not_available": "Keine Wetterquelle erreichbar",
+  "permission_denied": "Zugriff verweigert",
+  "timeout": "Anfrage hat das Zeitlimit überschritten",
+  "network_error": "Netzwerkfehler: {}",
+  "parse_error": "Fehler beim Auswerten: {}",
+  "provider_failed": "Anbieter fehlgeschlagen: {}",
+  "location_failed": "Standort konnte nicht ermittelt werden: {}"
+}
