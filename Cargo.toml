@@ -7,7 +7,7 @@ description = "Weather framework for TontooOS - 20 keyless weather functions wit
 authors = ["arlomu"]
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["dylib"]
 name = "weatherkit"
 path = "src/lib.rs"
 
