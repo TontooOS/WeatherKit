@@ -7,8 +7,9 @@ pub mod types;
 
 pub use location::LocationResolver;
 pub use types::{
-    weather_code_description, AirQuality, CurrentWeather, ForecastDay, HistoricalDay, HourPoint,
-    MarineConditions, MoonPhase, Place, PollenLevels, Result, SunTimes, WeatherError,
+    weather_code_description, AirQuality, AirQualityPoint, AlertSeverity, CurrentWeather,
+    ForecastDay, HistoricalDay, HourPoint, MarineConditions, MinutePoint, MoonPhase, MoonTimes,
+    Place, PollenLevels, Result, SunTimes, TwilightTimes, WeatherAlert, WeatherError,
 };
 
 use location::LocationResolver as Resolver;
@@ -254,6 +255,63 @@ impl WeatherKit {
         self.cached_daily(days.clamp(1, 16))
     }
 
+    // ---- minutely precipitation (next-hour forecast) ----
+
+    /// Precipitation in 15 minute steps for the next `minutes` minutes.
+    ///
+    /// Primary source is the keyless Open-Meteo `minutely_15` endpoint.
+    /// Fallback spreads the hourly forecast evenly across four quarters,
+    /// so an answer exists even when the minutely endpoint fails.
+    pub fn minutely_precipitation(&self, minutes: usize) -> Result<Vec<MinutePoint>> {
+        let minutes = minutes.clamp(15, 240);
+        let points = (minutes + 14) / 15;
+        let (lat, lon) = self.coords()?;
+        providers::open_meteo::fetch_minutely(lat, lon, points).or_else(|_| {
+            let hours = self.cached_hourly((minutes + 59) / 60)?;
+            Ok(interpolate_minutely(&hours, points))
+        })
+    }
+
+    /// Total precipitation of the coming 60 minutes in millimeters.
+    pub fn precipitation_next_hour(&self) -> Result<f64> {
+        Ok(self
+            .minutely_precipitation(60)?
+            .iter()
+            .map(|p| p.precipitation_mm)
+            .sum())
+    }
+
+    // ---- alerts ----
+
+    /// Active weather alerts with severity levels.
+    ///
+    /// Official MET Norway MetAlerts first (keyless, Europe coverage), then
+    /// locally synthesized advisories from current and forecast data as the
+    /// global keyless fallback. Alerts with severity `Moderate` or higher
+    /// are push-capable; see [`WeatherAlert::should_notify`].
+    pub fn active_alerts(&self) -> Result<Vec<WeatherAlert>> {
+        let (lat, lon) = self.coords()?;
+        let mut alerts = providers::alerts::fetch_metalerts(lat, lon).unwrap_or_default();
+
+        let current = Self::fetch_current_uncached((lat, lon)).ok();
+        let hourly = providers::open_meteo::fetch_hourly(lat, lon, 24)
+            .or_else(|_| providers::met_no::fetch_hourly(lat, lon, 24))
+            .unwrap_or_default();
+        let daily = providers::open_meteo::fetch_daily(lat, lon, 2)
+            .or_else(|_| providers::met_no::fetch_daily(lat, lon, 2))
+            .unwrap_or_default();
+
+        if let Some(current) = current {
+            for alert in providers::alerts::synthesize(&current, &hourly, &daily) {
+                if !alerts.iter().any(|a| a.kind == alert.kind) {
+                    alerts.push(alert);
+                }
+            }
+        }
+
+        Ok(alerts)
+    }
+
     // ---- history and environment ----
 
     /// Observed daily values between two ISO dates (`YYYY-MM-DD`).
@@ -299,6 +357,15 @@ impl WeatherKit {
         providers::air_quality(lat, lon)
     }
 
+    /// Hourly AQI forecast for the next `hours` hours (max 168).
+    ///
+    /// Keyless CAMS Europe first, CAMS Global as fallback, same as
+    /// [`air_quality`](Self::air_quality).
+    pub fn air_quality_forecast(&self, hours: usize) -> Result<Vec<AirQualityPoint>> {
+        let (lat, lon) = self.coords()?;
+        providers::air_quality::fetch_forecast(lat, lon, hours.clamp(1, 168))
+    }
+
     /// Pollen concentrations in grains per cubic meter.
     ///
     /// Only meaningful in Europe where CAMS Europe provides pollen data; other
@@ -319,6 +386,22 @@ impl WeatherKit {
     pub fn sun_times(&self, year: i32, month: u32, day: u32) -> Result<SunTimes> {
         let (lat, lon) = self.coords()?;
         Ok(astronomy::sun_times(lat, lon, year, month, day))
+    }
+
+    /// Civil, nautical and astronomical twilight in UTC, computed locally.
+    pub fn twilight_times(&self, year: i32, month: u32, day: u32) -> Result<TwilightTimes> {
+        let (lat, lon) = self.coords()?;
+        Ok(astronomy::twilight_times(lat, lon, year, month, day))
+    }
+
+    /// Moonrise and moonset in UTC plus phase, computed locally.
+    ///
+    /// Rise/set times use the low-precision lunar position and are accurate
+    /// to roughly fifteen minutes; entries are `None` when the moon stays
+    /// above or below the horizon all day.
+    pub fn moon_times(&self, year: i32, month: u32, day: u32) -> Result<MoonTimes> {
+        let (lat, lon) = self.coords()?;
+        Ok(astronomy::moon_times(lat, lon, year, month, day))
     }
 
     /// Current moon phase computed locally, no network involved.
@@ -360,6 +443,27 @@ impl WeatherKit {
             .map_err(join_error)?
     }
 
+    pub async fn minutely_precipitation_async(&self, minutes: usize) -> Result<Vec<MinutePoint>> {
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || this.minutely_precipitation(minutes))
+            .await
+            .map_err(join_error)?
+    }
+
+    pub async fn active_alerts_async(&self) -> Result<Vec<WeatherAlert>> {
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || this.active_alerts())
+            .await
+            .map_err(join_error)?
+    }
+
+    pub async fn air_quality_forecast_async(&self, hours: usize) -> Result<Vec<AirQualityPoint>> {
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || this.air_quality_forecast(hours))
+            .await
+            .map_err(join_error)?
+    }
+
     pub async fn air_quality_async(&self) -> Result<AirQuality> {
         let this = self.clone();
         tokio::task::spawn_blocking(move || this.air_quality())
@@ -378,6 +482,31 @@ impl WeatherKit {
 
 fn join_error(err: tokio::task::JoinError) -> WeatherError {
     WeatherError::NetworkError(err.to_string())
+}
+
+/// Spreads hourly precipitation evenly across 15 minute quarters.
+///
+/// Offline fallback for [`WeatherKit::minutely_precipitation`] when the
+/// keyless minutely endpoint is unreachable.
+fn interpolate_minutely(hours: &[HourPoint], points: usize) -> Vec<MinutePoint> {
+    let mut out = Vec::with_capacity(points);
+    for hour in hours {
+        for quarter in 0..4 {
+            if out.len() >= points {
+                break;
+            }
+            out.push(MinutePoint {
+                time: format!("{}:+{:02}", hour.time, quarter * 15),
+                precipitation_mm: hour.precipitation_mm / 4.0,
+                precip_probability_pct: hour.precip_probability_pct,
+                temperature_c: Some(hour.temperature_c),
+            });
+        }
+        if out.len() >= points {
+            break;
+        }
+    }
+    out
 }
 
 fn estimate_uv(cloud_cover_pct: Option<i32>, is_day: bool) -> f64 {

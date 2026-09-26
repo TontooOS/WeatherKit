@@ -1,7 +1,7 @@
 use crate::http::get_json;
 use crate::types::{
     weather_code_description, CurrentWeather, ForecastDay, HistoricalDay, HourPoint,
-    MarineConditions, Result, WeatherError,
+    MarineConditions, MinutePoint, Result, WeatherError,
 };
 
 pub const FORECAST_API: &str = "https://api.open-meteo.com/v1/forecast";
@@ -203,6 +203,63 @@ pub fn fetch_daily(lat: f64, lon: f64, days: u8) -> Result<Vec<ForecastDay>> {
     parse_daily(&json, days as usize)
 }
 
+/// Builds the minutely-15 URL for next-hour precipitation.
+///
+/// Keyless Open-Meteo `minutely_15` variables in 15 minute steps; two forecast
+/// days are requested so the window never ends at midnight.
+pub fn minutely_url(lat: f64, lon: f64) -> String {
+    format!(
+        "{}?latitude={:.5}&longitude={:.5}\
+&minutely_15=temperature_2m,precipitation,precipitation_probability,weather_code\
+&forecast_days=2&timezone=auto",
+        FORECAST_API, lat, lon
+    )
+}
+
+/// Parses `minutely_15` arrays into [`MinutePoint`] values.
+pub fn parse_minutely(json: &serde_json::Value, limit: usize) -> Result<Vec<MinutePoint>> {
+    let block = json
+        .get("minutely_15")
+        .ok_or_else(|| WeatherError::ParseError("missing minutely_15 block".into()))?;
+    let empty = Vec::new();
+    let times = block
+        .get("time")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let precip = block
+        .get("precipitation")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let prob = block
+        .get("precipitation_probability")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let temps = block
+        .get("temperature_2m")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+
+    let mut points = Vec::with_capacity(limit.min(times.len()));
+    for index in 0..times.len() {
+        if points.len() >= limit {
+            break;
+        }
+        points.push(MinutePoint {
+            time: times[index].as_str().unwrap_or_default().to_string(),
+            precipitation_mm: precip.get(index).and_then(|v| v.as_f64()).unwrap_or(0.0),
+            precip_probability_pct: prob.get(index).and_then(|v| v.as_i64()).map(|v| v as i32),
+            temperature_c: temps.get(index).and_then(|v| v.as_f64()),
+        });
+    }
+
+    Ok(points)
+}
+
+pub fn fetch_minutely(lat: f64, lon: f64, points: usize) -> Result<Vec<MinutePoint>> {
+    let json = get_json(&minutely_url(lat, lon))?;
+    parse_minutely(&json, points)
+}
+
 /// Builds the archive URL for historical weather.
 pub fn archive_url(lat: f64, lon: f64, start_date: &str, end_date: &str) -> String {
     format!(
@@ -393,6 +450,36 @@ mod tests {
         assert_eq!(days[1].sunrise_utc.as_deref(), Some("2026-08-25T04:44"));
 
         assert!(parse_daily(&json!({}), 5).is_err());
+    }
+
+    #[test]
+    fn parses_minutely_arrays() {
+        let sample = json!({
+            "minutely_15": {
+                "time": ["2026-08-24T12:00", "2026-08-24T12:15", "2026-08-24T12:30"],
+                "temperature_2m": [24.3, 24.1, 23.8],
+                "precipitation": [0.0, 0.4, 1.1],
+                "precipitation_probability": [5, 40, 80],
+                "weather_code": [1, 61, 63]
+            }
+        });
+
+        let points = parse_minutely(&sample, 2).unwrap();
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].time, "2026-08-24T12:00");
+        assert_eq!(points[0].precipitation_mm, 0.0);
+        assert_eq!(points[0].temperature_c, Some(24.3));
+        assert_eq!(points[1].precip_probability_pct, Some(40));
+
+        assert!(parse_minutely(&json!({}), 2).is_err());
+    }
+
+    #[test]
+    fn builds_minutely_url() {
+        let url = minutely_url(52.52, 13.405);
+        assert!(url.contains("minutely_15="));
+        assert!(url.contains("precipitation"));
+        assert!(url.contains("timezone=auto"));
     }
 
     #[test]

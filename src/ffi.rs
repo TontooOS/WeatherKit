@@ -57,6 +57,28 @@ fn forecast_json(day: &crate::types::ForecastDay) -> Value {
     })
 }
 
+fn alert_json(alert: &crate::types::WeatherAlert) -> Value {
+    json!({
+        "headline": alert.headline,
+        "description": alert.description,
+        "severity": alert.severity.as_str(),
+        "kind": alert.kind,
+        "source": alert.source,
+        "effective": alert.effective,
+        "expires": alert.expires,
+        "should_notify": alert.should_notify(),
+    })
+}
+
+fn minutely_json(point: &crate::types::MinutePoint) -> Value {
+    json!({
+        "time": point.time,
+        "precipitation_mm": point.precipitation_mm,
+        "precip_probability_pct": point.precip_probability_pct,
+        "temperature_c": point.temperature_c,
+    })
+}
+
 /// The framework version as a static C string.
 #[no_mangle]
 pub extern "C" fn tontoo_weatherkit_version() -> *const c_char {
@@ -114,6 +136,46 @@ pub unsafe extern "C" fn tontoo_weatherkit_weekly_forecast(
         )),
         Err(_) => {
             set_error(error_out, "forecast unavailable");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Active weather alerts. Returns a JSON array or null.
+///
+/// # Safety
+///
+/// `error_out`, when not null, must point to a writable `char*`.
+#[no_mangle]
+pub unsafe extern "C" fn tontoo_weatherkit_active_alerts(
+    error_out: *mut *mut c_char,
+) -> *mut c_char {
+    match crate::WeatherKit::new().active_alerts() {
+        Ok(alerts) => json_ptr(&Value::Array(
+            alerts.iter().map(alert_json).collect(),
+        )),
+        Err(_) => {
+            set_error(error_out, "alerts unavailable");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Next-hour precipitation in 15 minute steps. Returns a JSON array or null.
+///
+/// # Safety
+///
+/// `error_out`, when not null, must point to a writable `char*`.
+#[no_mangle]
+pub unsafe extern "C" fn tontoo_weatherkit_minutely_precipitation(
+    error_out: *mut *mut c_char,
+) -> *mut c_char {
+    match crate::WeatherKit::new().minutely_precipitation(60) {
+        Ok(points) => json_ptr(&Value::Array(
+            points.iter().map(minutely_json).collect(),
+        )),
+        Err(_) => {
+            set_error(error_out, "minutely forecast unavailable");
             std::ptr::null_mut()
         }
     }

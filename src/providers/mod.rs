@@ -1,4 +1,5 @@
 pub mod air_quality;
+pub mod alerts;
 pub mod geocode;
 pub mod met_no;
 pub mod open_meteo;

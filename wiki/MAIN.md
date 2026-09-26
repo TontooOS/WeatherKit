@@ -15,9 +15,10 @@ backed by a fallback source, with location coming only from CoreLocation.
 | Main index | [MAIN.md](MAIN.md) | This page |
 | Rules | [RULE.md](RULE.md) | Development and usage rules |
 | Current | [Current.md](Current.md) | `WeatherKit` current conditions and the twelve single value getters |
-| Forecast | [Forecast.md](Forecast.md) | Hourly and daily forecasts, historical archive |
-| Environment | [Environment.md](Environment.md) | Air quality, pollen, marine conditions |
-| Astronomy | [Astronomy.md](Astronomy.md) | Local sunrise/sunset, moon phase, daylight check |
+| Forecast | [Forecast.md](Forecast.md) | Hourly and daily forecasts, minutely precipitation, historical archive |
+| Alerts | [Alerts.md](Alerts.md) | Weather alerts with severity and push notifications |
+| Environment | [Environment.md](Environment.md) | Air quality, AQI forecast, pollen, marine conditions |
+| Astronomy | [Astronomy.md](Astronomy.md) | Local sunrise/sunset, twilight, moon phase, moonrise/moonset, daylight check |
 | Places | [Places.md](Places.md) | Place search and weather by place name |
 | Localization | [Localization.md](Localization.md) | Error message localization via `lang/en_us.json` and `lang/de_de.json` |
 
@@ -47,8 +48,11 @@ keyless:
 | Current conditions | Open-Meteo forecast | wttr.in (`format=j1`) |
 | Current (last resort) | - | MET Norway locationforecast (degraded) |
 | Hourly/daily forecasts | Open-Meteo forecast | MET Norway locationforecast compact |
+| Minutely precipitation | Open-Meteo `minutely_15` | Hourly forecast spread across quarters |
+| Alerts | MET Norway MetAlerts | Local synthesis from current and forecast data |
 | Historical | Open-Meteo ERA5 archive | Open-Meteo forecast with `past_days` |
 | Air quality / pollen | CAMS Europe domain | CAMS Global domain |
+| AQI forecast | CAMS Europe hourly | CAMS Global hourly |
 | Marine | Open-Meteo Marine (ECMWF WAM) | MET Norway oceanforecast |
 | Places | Open-Meteo geocoding | Nominatim (OpenStreetMap) |
 | Astronomy | Local calculation | none needed (offline) |
@@ -60,5 +64,7 @@ coordinates instead. Results are cached per rounded coordinate for ten minutes
 
 ## Changelog
 
+- 2026-09-26: Minutely precipitation, alerts with severity and push flag,
+  twilight times, moonrise/moonset, AQI forecast; new Alerts.md page.
 - 2026-08-25: Initial wiki with Current, Forecast, Environment, Astronomy,
   Places and Localization pages.

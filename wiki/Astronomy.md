@@ -69,6 +69,50 @@ pub struct MoonPhase {
 
 Illumination follows `(1 - cos(2π * fraction)) / 2`.
 
+## twilight_times
+
+```rust
+pub fn twilight_times(&self, year: i32, month: u32, day: u32) -> Result<TwilightTimes>
+```
+
+Civil (6 deg), nautical (12 deg) and astronomical (18 deg) twilight in UTC,
+computed locally with the same sunrise equation at wider zenith angles.
+
+```rust
+pub struct TwilightTimes {
+    pub dawn_civil: Option<(u32, u32)>,
+    pub dusk_civil: Option<(u32, u32)>,
+    pub dawn_nautical: Option<(u32, u32)>,
+    pub dusk_nautical: Option<(u32, u32)>,
+    pub dawn_astronomical: Option<(u32, u32)>,
+    pub dusk_astronomical: Option<(u32, u32)>,
+}
+```
+
+- Entries are `None` when the sun never reaches that depression angle (e.g.
+  no astronomical night in Berlin summer, no twilight at all in polar night).
+- Ordering on days where every event occurs: astronomical dawn first, civil
+  dawn last; civil dusk first, astronomical dusk last.
+
+## moon_times
+
+```rust
+pub fn moon_times(&self, year: i32, month: u32, day: u32) -> Result<MoonTimes>
+```
+
+Moonrise and moonset in UTC plus phase, computed locally with the
+low-precision lunar position. Accuracy is roughly fifteen minutes; entries
+are `None` when the moon stays above or below the horizon all day.
+
+```rust
+pub struct MoonTimes {
+    pub moonrise: Option<(u32, u32)>,
+    pub moonset: Option<(u32, u32)>,
+    pub illumination_pct: f64,
+    pub phase_name: &'static str,
+}
+```
+
 ## Pure functions
 
 The astronomy module exposes its math for reuse:
@@ -95,6 +139,12 @@ println!("{:02}:{:02} - {:02}:{:02} UTC", times.sunrise.0,
 
 let moon = kit.moon_phase();
 println!("{} ({:.0}% illuminated)", moon.name, moon.illumination_pct);
+
+let twilight = kit.twilight_times(2026, 8, 24).unwrap();
+println!("civil dawn {:?}", twilight.dawn_civil);
+
+let moon_times = kit.moon_times(2026, 8, 24).unwrap();
+println!("moonrise {:?}", moon_times.moonrise);
 ```
 
 ## Cross References

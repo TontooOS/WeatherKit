@@ -1,4 +1,4 @@
-use crate::types::{MoonPhase, SunTimes};
+use crate::types::{MoonPhase, MoonTimes, SunTimes, TwilightTimes};
 
 const J2000: f64 = 2451545.0;
 const SYNODIC_MONTH: f64 = 29.530588853;
@@ -63,6 +63,43 @@ pub fn now_julian_day() -> f64 {
 ///
 /// Handles polar day and night explicitly instead of returning NaN values.
 pub fn sun_times(lat: f64, lon: f64, year: i32, month: u32, day: u32) -> SunTimes {
+    match sun_event(lat, lon, year, month, day, 90.833) {
+        Some((rise, set, length)) => SunTimes {
+            sunrise: rise,
+            sunset: set,
+            day_length_secs: length,
+            polar_day: false,
+            polar_night: false,
+        },
+        None if polar_day(lat, lon, year, month, day) => SunTimes {
+            sunrise: (0, 0),
+            sunset: (23, 59),
+            day_length_secs: 86340,
+            polar_day: true,
+            polar_night: false,
+        },
+        None => SunTimes {
+            sunrise: (12, 0),
+            sunset: (12, 0),
+            day_length_secs: 0,
+            polar_day: false,
+            polar_night: true,
+        },
+    }
+}
+
+/// Generic sunrise-equation solver for any zenith angle.
+///
+/// Returns `None` when the sun never crosses the zenith that day (polar day
+/// or polar night for that angle).
+fn sun_event(
+    lat: f64,
+    lon: f64,
+    year: i32,
+    month: u32,
+    day: u32,
+    zenith_deg: f64,
+) -> Option<((u32, u32), (u32, u32), u64)> {
     let jd_midnight = julian_day(year, month, day);
     let n = jd_midnight - J2000;
     let j_prime = n - lon / 360.0;
@@ -79,46 +116,67 @@ pub fn sun_times(lat: f64, lon: f64, year: i32, month: u32, day: u32) -> SunTime
     let declination_sin = deg(ecliptic_lon).sin() * deg(23.44).sin();
     let declination = declination_sin.asin();
 
-    let hour_arg = (deg(-0.83).sin() - lat.to_radians().sin() * declination.sin())
-        / (lat.to_radians().cos() * declination.cos());
-
-    if hour_arg < -1.0 {
-        return SunTimes {
-            sunrise: (0, 0),
-            sunset: (23, 59),
-            day_length_secs: 86340,
-            polar_day: true,
-            polar_night: false,
-        };
-    }
-    if hour_arg > 1.0 {
-        return SunTimes {
-            sunrise: (12, 0),
-            sunset: (12, 0),
-            day_length_secs: 0,
-            polar_day: false,
-            polar_night: true,
-        };
+    let hour_arg = hour_argument(lat, declination, zenith_deg);
+    if hour_arg < -1.0 || hour_arg > 1.0 {
+        return None;
     }
 
     let hour_angle = hour_arg.acos();
     let half_day_fraction = hour_angle / std::f64::consts::TAU;
-    let sunrise_jd = j_transit - half_day_fraction;
-    let sunset_jd = j_transit + half_day_fraction;
+    let rise_jd = j_transit - half_day_fraction;
+    let set_jd = j_transit + half_day_fraction;
 
-    let sunrise = julian_to_hhmm(sunrise_jd);
-    let sunset = julian_to_hhmm(sunset_jd);
+    let sunrise = julian_to_hhmm(rise_jd);
+    let sunset = julian_to_hhmm(set_jd);
 
     let rise_secs = sunrise.0 as u64 * 3600 + sunrise.1 as u64 * 60;
     let set_secs = sunset.0 as u64 * 3600 + sunset.1 as u64 * 60;
     let day_length_secs = set_secs.saturating_sub(rise_secs);
 
-    SunTimes {
-        sunrise,
-        sunset,
-        day_length_secs,
-        polar_day: false,
-        polar_night: false,
+    Some((sunrise, sunset, day_length_secs))
+}
+
+fn hour_argument(lat: f64, declination: f64, zenith_deg: f64) -> f64 {
+    (zenith_deg.to_radians().cos() - lat.to_radians().sin() * declination.sin())
+        / (lat.to_radians().cos() * declination.cos())
+}
+
+/// Whether the sun stays up all day (used to separate polar day/night).
+fn polar_day(lat: f64, lon: f64, year: i32, month: u32, day: u32) -> bool {
+    let jd_midnight = julian_day(year, month, day);
+    let n = jd_midnight - J2000 + 0.5 - lon / 360.0;
+    let mean_anomaly = normalize_deg(357.5291 + 0.98560028 * n);
+    let center =
+        1.9148 * deg(mean_anomaly).sin() + 0.02 * deg(2.0 * mean_anomaly).sin()
+            + 0.0003 * deg(3.0 * mean_anomaly).sin();
+    let ecliptic_lon = normalize_deg(mean_anomaly + center + 180.0 + 102.9372);
+    let declination = (deg(ecliptic_lon).sin() * deg(23.44).sin()).asin();
+    lat.to_radians().sin() * declination.sin()
+        + lat.to_radians().cos() * declination.cos()
+        > deg(-0.83).sin()
+}
+
+/// Civil (6 deg), nautical (12 deg) and astronomical (18 deg) twilight.
+///
+/// Fully offline like [`sun_times`]. Entries are `None` when the sun never
+/// reaches that depression angle (polar summer/winter).
+pub fn twilight_times(lat: f64, lon: f64, year: i32, month: u32, day: u32) -> TwilightTimes {
+    let pair = |zenith: f64| -> (Option<(u32, u32)>, Option<(u32, u32)>) {
+        match sun_event(lat, lon, year, month, day, zenith) {
+            Some((rise, set, _)) => (Some(rise), Some(set)),
+            None => (None, None),
+        }
+    };
+    let (dawn_civil, dusk_civil) = pair(96.0);
+    let (dawn_nautical, dusk_nautical) = pair(102.0);
+    let (dawn_astronomical, dusk_astronomical) = pair(108.0);
+    TwilightTimes {
+        dawn_civil,
+        dusk_civil,
+        dawn_nautical,
+        dusk_nautical,
+        dawn_astronomical,
+        dusk_astronomical,
     }
 }
 
@@ -168,6 +226,122 @@ fn phase_name(fraction: f64) -> &'static str {
         f if f < 0.72 => "Waning Gibbous",
         f if f < 0.78 => "Last Quarter",
         _ => "Waning Crescent",
+    }
+}
+
+fn gmst_hours(jd: f64) -> f64 {
+    normalize_deg(280.46061837 + 360.98564736629 * (jd - 2451545.0)) / 15.0
+}
+
+/// Low-precision lunar equatorial coordinates (Paul Schlyter algorithm).
+///
+/// Accurate to a few arcminutes, which keeps rise/set times within roughly
+/// fifteen minutes. Fully offline, no network involved.
+fn moon_equatorial(jd: f64) -> (f64, f64) {
+    let d = jd - 2451543.5;
+    let node = normalize_deg(125.1228 - 0.0529538083 * d);
+    let incl = 5.1454_f64.to_radians();
+    let peri = normalize_deg(318.0634 + 0.1643573223 * d);
+    let ecc = 0.054900;
+    let anomaly = normalize_deg(115.3654 + 13.0649929509 * d);
+
+    let m_rad = anomaly.to_radians();
+    let mut eccentric = m_rad + ecc * m_rad.sin() * (1.0 + ecc * m_rad.cos());
+    for _ in 0..3 {
+        eccentric -= (eccentric - ecc * eccentric.sin() - m_rad) / (1.0 - ecc * eccentric.cos());
+    }
+    let xv = 60.2666 * (eccentric.cos() - ecc);
+    let yv = 60.2666 * ((1.0 - ecc * ecc).sqrt() * eccentric.sin());
+    let dist = (xv * xv + yv * yv).sqrt();
+    let true_anomaly = yv.atan2(xv).to_degrees();
+
+    let lon_orbit = normalize_deg(true_anomaly + peri);
+    let node_rad = node.to_radians();
+    let lon_rad = lon_orbit.to_radians();
+    let xh = dist * (node_rad.cos() * lon_rad.cos());
+    let yh = dist * (node_rad.sin() * lon_rad.cos() * incl.cos() - lon_rad.sin() * incl.sin());
+    let zh = dist * (node_rad.sin() * lon_rad.cos() * incl.sin() + lon_rad.sin() * incl.cos());
+    let mut lon_ecl = normalize_deg(yh.atan2(xh).to_degrees());
+    let mut lat_ecl = (zh / dist).asin().to_degrees();
+
+    let sun_anomaly = normalize_deg(356.0470 + 0.9856002585 * d);
+    let sun_lon = normalize_deg(sun_anomaly + 282.9404 + 4.70935e-5 * d);
+    let mean_lon = normalize_deg(node + peri + anomaly);
+    let elong = normalize_deg(mean_lon - sun_lon);
+    let arg_lat = normalize_deg(mean_lon - node);
+
+    let d_rad = elong.to_radians();
+    let m_rad = anomaly.to_radians();
+    let ms_rad = sun_anomaly.to_radians();
+    let f_rad = arg_lat.to_radians();
+    lon_ecl += -1.274 * (m_rad - 2.0 * d_rad).sin()
+        + 0.658 * (2.0 * d_rad).sin()
+        - 0.186 * ms_rad.sin()
+        - 0.059 * (2.0 * m_rad - 2.0 * d_rad).sin()
+        - 0.057 * (m_rad - 2.0 * d_rad + ms_rad).sin();
+    lat_ecl += -0.173 * (f_rad - 2.0 * d_rad).sin()
+        - 0.055 * (m_rad - f_rad - 2.0 * d_rad).sin()
+        - 0.046 * (m_rad + f_rad - 2.0 * d_rad).sin()
+        + 0.033 * (f_rad + 2.0 * d_rad).sin();
+
+    let obliquity = (23.4393 - 3.563e-7 * d).to_radians();
+    let lon_rad = lon_ecl.to_radians();
+    let lat_rad = lat_ecl.to_radians();
+    let x = lon_rad.cos() * lat_rad.cos();
+    let y = lon_rad.sin() * lat_rad.cos() * obliquity.cos() - lat_rad.sin() * obliquity.sin();
+    let z = lon_rad.sin() * lat_rad.cos() * obliquity.sin() + lat_rad.sin() * obliquity.cos();
+    let ra = normalize_deg(y.atan2(x).to_degrees()) / 15.0;
+    let dec = z.asin().to_degrees();
+    (ra, dec)
+}
+
+fn moon_altitude_deg(lat: f64, lon: f64, jd: f64) -> f64 {
+    let (ra_hours, dec_deg) = moon_equatorial(jd);
+    let lst = gmst_hours(jd) + lon / 15.0;
+    let hour_angle = ((lst - ra_hours) * 15.0).to_radians();
+    let lat_rad = lat.to_radians();
+    let dec_rad = dec_deg.to_radians();
+    (dec_rad.sin() * lat_rad.sin() + dec_rad.cos() * lat_rad.cos() * hour_angle.cos()).asin()
+        .to_degrees()
+}
+
+/// Moonrise and moonset in UTC for the given civil date.
+///
+/// Samples the low-precision lunar altitude every ten minutes and
+/// interpolates horizon crossings. Accuracy is roughly fifteen minutes;
+/// entries are `None` when the moon stays up or down all day. Fully offline.
+pub fn moon_times(lat: f64, lon: f64, year: i32, month: u32, day: u32) -> MoonTimes {
+    let jd0 = julian_day(year, month, day);
+    let step_days = 10.0 / 1440.0;
+    let steps = 144;
+
+    let mut altitudes = Vec::with_capacity(steps + 1);
+    for index in 0..=steps {
+        altitudes.push(moon_altitude_deg(lat, lon, jd0 + index as f64 * step_days));
+    }
+
+    let mut moonrise = None;
+    let mut moonset = None;
+    for window in altitudes.windows(2).enumerate() {
+        let (prev, next) = (window.1[0], window.1[1]);
+        if prev < 0.0 && next >= 0.0 && moonrise.is_none() {
+            let frac = prev.abs() / (next - prev);
+            moonrise = Some(julian_to_hhmm(jd0 + (window.0 as f64 + frac) * step_days));
+        } else if prev >= 0.0 && next < 0.0 && moonset.is_none() {
+            let frac = prev / (prev - next);
+            moonset = Some(julian_to_hhmm(jd0 + (window.0 as f64 + frac) * step_days));
+        }
+        if moonrise.is_some() && moonset.is_some() {
+            break;
+        }
+    }
+
+    let phase = moon_phase();
+    MoonTimes {
+        moonrise,
+        moonset,
+        illumination_pct: phase.illumination_pct,
+        phase_name: phase.name,
     }
 }
 
@@ -236,5 +410,48 @@ mod tests {
         assert_eq!(phase_name(0.75), "Last Quarter");
         assert_eq!(phase_name(0.85), "Waning Crescent");
         assert_eq!(phase_name(0.99), "New Moon");
+    }
+
+    #[test]
+    fn twilight_ordering_equator() {
+        // At the equator on equinox every twilight occurs, so full ordering holds.
+        let tw = twilight_times(0.0, 0.0, 2026, 3, 20);
+        let to_min = |t: Option<(u32, u32)>| t.map(|(h, m)| h * 60 + m).unwrap();
+        assert!(to_min(tw.dawn_astronomical) < to_min(tw.dawn_nautical));
+        assert!(to_min(tw.dawn_nautical) < to_min(tw.dawn_civil));
+        assert!(to_min(tw.dusk_civil) < to_min(tw.dusk_nautical));
+        assert!(to_min(tw.dusk_nautical) < to_min(tw.dusk_astronomical));
+    }
+
+    #[test]
+    fn twilight_summer_night_never_dark() {
+        // Berlin in June never reaches astronomical night; missing entries
+        // are None instead of wrong times.
+        let tw = twilight_times(52.52, 13.405, 2026, 6, 21);
+        assert!(tw.dawn_civil.is_some() && tw.dusk_civil.is_some());
+        assert!(tw.dawn_astronomical.is_none() || tw.dusk_astronomical.is_none());
+    }
+
+    #[test]
+    fn polar_night_has_no_twilight_events() {
+        let tw = twilight_times(78.22, 15.63, 2026, 12, 21);
+        assert!(tw.dawn_civil.is_none() || tw.dusk_civil.is_none());
+    }
+
+    #[test]
+    fn moon_times_in_valid_range() {
+        let moon = moon_times(52.52, 13.405, 2026, 8, 24);
+        for event in [moon.moonrise, moon.moonset].into_iter().flatten() {
+            assert!(event.0 < 24 && event.1 < 60);
+        }
+        assert!((0.0..=100.0).contains(&moon.illumination_pct));
+        assert!(!moon.phase_name.is_empty());
+    }
+
+    #[test]
+    fn moon_equatorial_in_range() {
+        let (ra, dec) = moon_equatorial(now_julian_day());
+        assert!((0.0..24.0).contains(&ra));
+        assert!((-30.0..30.0).contains(&dec));
     }
 }

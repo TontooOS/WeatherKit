@@ -82,6 +82,99 @@ pub struct HourPoint {
 }
 
 #[derive(Debug, Clone)]
+pub struct MinutePoint {
+    pub time: String,
+    pub precipitation_mm: f64,
+    pub precip_probability_pct: Option<i32>,
+    pub temperature_c: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AlertSeverity {
+    Minor,
+    Moderate,
+    Severe,
+    Extreme,
+}
+
+impl AlertSeverity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AlertSeverity::Minor => "Minor",
+            AlertSeverity::Moderate => "Moderate",
+            AlertSeverity::Severe => "Severe",
+            AlertSeverity::Extreme => "Extreme",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "moderate" | "orange" => AlertSeverity::Moderate,
+            "severe" | "red" => AlertSeverity::Severe,
+            "extreme" | "purple" | "darkred" => AlertSeverity::Extreme,
+            _ => AlertSeverity::Minor,
+        }
+    }
+
+    /// Whether the system should trigger a push notification for this level.
+    pub fn should_notify(&self) -> bool {
+        *self >= AlertSeverity::Moderate
+    }
+}
+
+impl fmt::Display for AlertSeverity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WeatherAlert {
+    pub headline: String,
+    pub description: String,
+    pub severity: AlertSeverity,
+    pub kind: String,
+    pub source: String,
+    pub effective: Option<String>,
+    pub expires: Option<String>,
+}
+
+impl WeatherAlert {
+    /// Whether the system should trigger a push notification for this alert.
+    pub fn should_notify(&self) -> bool {
+        self.severity.should_notify()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TwilightTimes {
+    pub dawn_civil: Option<(u32, u32)>,
+    pub dusk_civil: Option<(u32, u32)>,
+    pub dawn_nautical: Option<(u32, u32)>,
+    pub dusk_nautical: Option<(u32, u32)>,
+    pub dawn_astronomical: Option<(u32, u32)>,
+    pub dusk_astronomical: Option<(u32, u32)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MoonTimes {
+    pub moonrise: Option<(u32, u32)>,
+    pub moonset: Option<(u32, u32)>,
+    pub illumination_pct: f64,
+    pub phase_name: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct AirQualityPoint {
+    pub time: String,
+    pub european_aqi: Option<i32>,
+    pub us_aqi: Option<i32>,
+    pub pm2_5: Option<f64>,
+    pub pm10: Option<f64>,
+    pub ozone: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ForecastDay {
     pub date: String,
     pub temp_max_c: f64,
@@ -206,5 +299,44 @@ mod tests {
         assert_eq!(weather_code_description(95), "Thunderstorm");
         assert_eq!(weather_code_description(42), "Unknown");
         assert_eq!(weather_code_description(-1), "Unknown");
+    }
+
+    #[test]
+    fn severity_ordering_and_notify() {
+        assert!(AlertSeverity::Minor < AlertSeverity::Moderate);
+        assert!(AlertSeverity::Moderate < AlertSeverity::Severe);
+        assert!(AlertSeverity::Severe < AlertSeverity::Extreme);
+        assert!(!AlertSeverity::Minor.should_notify());
+        assert!(AlertSeverity::Moderate.should_notify());
+        assert!(AlertSeverity::Severe.should_notify());
+        assert!(AlertSeverity::Extreme.should_notify());
+    }
+
+    #[test]
+    fn severity_parsing() {
+        assert_eq!(AlertSeverity::from_str("minor"), AlertSeverity::Minor);
+        assert_eq!(AlertSeverity::from_str("Moderate"), AlertSeverity::Moderate);
+        assert_eq!(AlertSeverity::from_str("RED"), AlertSeverity::Severe);
+        assert_eq!(AlertSeverity::from_str("orange"), AlertSeverity::Moderate);
+        assert_eq!(AlertSeverity::from_str("unknown"), AlertSeverity::Minor);
+    }
+
+    #[test]
+    fn alert_notify_delegates_to_severity() {
+        let minor = WeatherAlert {
+            headline: "Fog".to_string(),
+            description: "Light fog".to_string(),
+            severity: AlertSeverity::Minor,
+            kind: "Fog".to_string(),
+            source: "test".to_string(),
+            effective: None,
+            expires: None,
+        };
+        assert!(!minor.should_notify());
+        let severe = WeatherAlert {
+            severity: AlertSeverity::Severe,
+            ..minor
+        };
+        assert!(severe.should_notify());
     }
 }

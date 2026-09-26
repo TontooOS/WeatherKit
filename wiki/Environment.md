@@ -52,6 +52,30 @@ pub struct PollenLevels {
 Outside Europe every field is typically `None`; that is a data limitation of
 CAMS, not an error.
 
+## air_quality_forecast
+
+```rust
+pub fn air_quality_forecast(&self, hours: usize) -> Result<Vec<AirQualityPoint>>
+```
+
+Hourly AQI forecast for the next `hours` hours (clamped to 1-168). Keyless
+CAMS Europe first, CAMS Global as fallback, same model as
+[`air_quality`](#airquality).
+
+```rust
+pub struct AirQualityPoint {
+    pub time: String,
+    pub european_aqi: Option<i32>,
+    pub us_aqi: Option<i32>,
+    pub pm2_5: Option<f64>,
+    pub pm10: Option<f64>,
+    pub ozone: Option<f64>,
+}
+```
+
+- Times are ISO stamps with timezone offset.
+- Returns `Err` when both domains fail.
+
 ## marine_conditions
 
 ```rust
@@ -81,6 +105,7 @@ pub struct MarineConditions {
 
 ```rust
 pub async fn air_quality_async(&self) -> Result<AirQuality>
+pub async fn air_quality_forecast_async(&self, hours: usize) -> Result<Vec<AirQualityPoint>>
 ```
 
 ## Usage / Example

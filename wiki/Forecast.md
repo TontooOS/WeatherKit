@@ -50,8 +50,37 @@ nine days from its timeseries.
 The MET Norway fallback buckets every timeseries entry by date and computes
 min/max temperature, total precipitation and peak wind itself.
 
-## historical_weather
+## minutely_precipitation
 
+```rust
+pub fn minutely_precipitation(&self, minutes: usize) -> Result<Vec<MinutePoint>>
+```
+
+Precipitation in 15 minute steps for the next `minutes` minutes (clamped to
+15-240, e.g. 60 for the next hour). Primary source is the keyless Open-Meteo
+`minutely_15` endpoint; the fallback spreads the hourly forecast evenly
+across four quarters, so an answer exists even when the minutely endpoint
+fails.
+
+```rust
+pub struct MinutePoint {
+    pub time: String,
+    pub precipitation_mm: f64,
+    pub precip_probability_pct: Option<i32>,
+    pub temperature_c: Option<f64>,
+}
+```
+
+```rust
+pub fn precipitation_next_hour(&self) -> Result<f64>
+```
+
+Sums the next 60 minutes into a single millimeter value.
+
+- Returns `Err` when location and both sources fail.
+- C FFI: `tontoo_weatherkit_minutely_precipitation` returns 60 minutes as JSON.
+
+## historical_weather
 ```rust
 pub fn historical_weather(
     &self,
@@ -83,6 +112,7 @@ pub struct HistoricalDay {
 
 ```rust
 pub async fn daily_forecast_async(&self, days: usize) -> Result<Vec<ForecastDay>>
+pub async fn minutely_precipitation_async(&self, minutes: usize) -> Result<Vec<MinutePoint>>
 ```
 
 ## Usage / Example
@@ -100,9 +130,12 @@ for day in kit.daily_forecast(7).unwrap() {
     println!("{} {:.0}/{:.0}°C", day.date, day.temp_min_c,
         day.temp_max_c);
 }
+
+println!("next hour: {:.1}mm", kit.precipitation_next_hour().unwrap());
 ```
 
 ## Cross References
 
 - [Current.md](Current.md) – shared cache and location resolution
 - [Astronomy.md](Astronomy.md) – offline alternative for sun times
+- [Alerts.md](Alerts.md) – alerts synthesized from hourly and daily data
