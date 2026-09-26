@@ -64,6 +64,9 @@ coordinates instead. Results are cached per rounded coordinate for ten minutes
 
 ## Changelog
 
+- 2026-09-26: HTTP transport moved to NetworkKit (`networkkit::http`).
+  `http::map_reqwest_error` is now `http::map_network_error`; the `reqwest`
+  dependency is removed.
 - 2026-09-26: Minutely precipitation, alerts with severity and push flag,
   twilight times, moonrise/moonset, AQI forecast; new Alerts.md page.
 - 2026-08-25: Initial wiki with Current, Forecast, Environment, Astronomy,

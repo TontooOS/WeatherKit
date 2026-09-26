@@ -56,15 +56,11 @@ pub fn parse_open_meteo(json: &serde_json::Value) -> Result<Vec<Place>> {
 }
 
 pub fn nominatim_search(query: &str, limit: usize) -> Result<Vec<Place>> {
-    use crate::http::USER_AGENT;
-    use crate::http::map_reqwest_error;
+    use crate::http::{response_json, USER_AGENT};
     use std::time::Duration;
 
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| WeatherError::NetworkError(e.to_string()))?;
+    let client = networkkit::http::HttpClient::with_user_agent(USER_AGENT)
+        .timeout(Duration::from_secs(10));
 
     let url = format!(
         "https://nominatim.openstreetmap.org/search?q={}&format=json&limit={}",
@@ -72,17 +68,18 @@ pub fn nominatim_search(query: &str, limit: usize) -> Result<Vec<Place>> {
         limit.clamp(1, 10)
     );
 
-    let response = client.get(&url).send().map_err(map_reqwest_error)?;
-    if !response.status().is_success() {
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(crate::http::map_network_error)?;
+    if !response.is_success() {
         return Err(WeatherError::ProviderFailed(format!(
             "Nominatim returned status {}",
-            response.status()
+            response.status
         )));
     }
 
-    let json: serde_json::Value = response
-        .json()
-        .map_err(|e| WeatherError::ParseError(e.to_string()))?;
+    let json: serde_json::Value = response_json(response)?;
     parse_nominatim(&json)
 }
 

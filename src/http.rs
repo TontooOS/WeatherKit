@@ -1,26 +1,19 @@
 use crate::types::{Result, WeatherError};
+use networkkit::http::{HttpClient, HttpResponse};
 use std::time::Duration;
 
 pub const USER_AGENT: &str = "TontooOS-WeatherKit/26.1 (TontooOS weather framework)";
 const TIMEOUT_SECS: u64 = 10;
 
-fn client() -> Result<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(TIMEOUT_SECS))
-        .build()
-        .map_err(|e| WeatherError::NetworkError(e.to_string()))
+fn client() -> HttpClient {
+    HttpClient::with_user_agent(USER_AGENT).timeout(Duration::from_secs(TIMEOUT_SECS))
 }
 
 pub fn get_json(url: &str) -> Result<serde_json::Value> {
-    let response = client()?
-        .get(url)
-        .send()
-        .map_err(map_reqwest_error)?;
+    let response = client().get(url).send().map_err(map_network_error)?;
 
-    let status = response.status();
-    if !status.is_success() {
-        if status.as_u16() == 429 {
+    if !response.is_success() {
+        if response.status == 429 {
             return Err(WeatherError::ProviderFailed(format!(
                 "rate limited by {}",
                 url.split('/').nth(2).unwrap_or("server")
@@ -28,23 +21,34 @@ pub fn get_json(url: &str) -> Result<serde_json::Value> {
         }
         return Err(WeatherError::ProviderFailed(format!(
             "HTTP {} from {}",
-            status,
+            response.status,
             url.split('/').nth(2).unwrap_or("server")
         )));
     }
 
-    response
-        .json::<serde_json::Value>()
-        .map_err(|e| WeatherError::ParseError(e.to_string()))
+    response_json(response)
 }
 
-pub fn map_reqwest_error(err: reqwest::Error) -> WeatherError {
-    if err.is_timeout() {
-        WeatherError::Timeout
-    } else if err.is_connect() || err.is_request() {
-        WeatherError::NotAvailable
-    } else {
-        WeatherError::NetworkError(err.to_string())
+/// Parses a response body as JSON, mapping transport leftovers to network
+/// errors and bad payloads to parse errors.
+pub fn response_json(response: HttpResponse) -> Result<serde_json::Value> {
+    response.json().map_err(|e| match e {
+        networkkit::types::NetworkError::ParseError(msg) => WeatherError::ParseError(msg),
+        other => WeatherError::NetworkError(other.to_string()),
+    })
+}
+
+pub fn map_network_error(err: networkkit::types::NetworkError) -> WeatherError {
+    use networkkit::types::NetworkError as NetErr;
+    match err {
+        NetErr::Timeout => WeatherError::Timeout,
+        NetErr::InvalidUrl(_)
+        | NetErr::NotAvailable
+        | NetErr::PermissionDenied => WeatherError::NotAvailable,
+        NetErr::ParseError(msg) => WeatherError::ParseError(msg),
+        NetErr::HttpError(msg) | NetErr::CommandFailed(msg) | NetErr::IoError(msg) => {
+            WeatherError::NetworkError(msg)
+        }
     }
 }
 
@@ -54,11 +58,20 @@ mod tests {
 
     #[test]
     fn classifies_errors() {
-        let raw = reqwest::blocking::get("http://127.0.0.1:1/x").unwrap_err();
-        let mapped = map_reqwest_error(raw);
-        assert!(matches!(
-            mapped,
-            WeatherError::NotAvailable | WeatherError::Timeout | WeatherError::NetworkError(_)
+        // Invalid URLs never touch the network.
+        let mapped = map_network_error(
+            networkkit::http::HttpRequest::get("not-a-url")
+                .send()
+                .unwrap_err(),
+        );
+        assert!(matches!(mapped, WeatherError::NotAvailable));
+
+        let mapped = map_network_error(networkkit::types::NetworkError::Timeout);
+        assert!(matches!(mapped, WeatherError::Timeout));
+
+        let mapped = map_network_error(networkkit::types::NetworkError::HttpError(
+            "connection refused".into(),
         ));
+        assert!(matches!(mapped, WeatherError::NetworkError(_)));
     }
 }

@@ -29,7 +29,7 @@ path = "examples/test_astronomy.rs"
 
 [dependencies]
 corelocation = { path = "../CoreLocation" }
-reqwest = { version = "0.11", features = ["json", "blocking"] }
+networkkit = { path = "../NetworkKit" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
