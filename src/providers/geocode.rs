@@ -1,5 +1,6 @@
 use crate::http::get_json;
 use crate::types::{Place, Result, WeatherError};
+use foundation::serialization::JsonValue;
 
 /// Searches places with the keyless Open-Meteo geocoding API.
 ///
@@ -34,7 +35,7 @@ pub fn open_meteo_search(query: &str, limit: usize) -> Result<Vec<Place>> {
     parse_open_meteo(&json)
 }
 
-pub fn parse_open_meteo(json: &serde_json::Value) -> Result<Vec<Place>> {
+pub fn parse_open_meteo(json: &JsonValue) -> Result<Vec<Place>> {
     let empty = Vec::new();
     let results = json
         .get("results")
@@ -79,11 +80,11 @@ pub fn nominatim_search(query: &str, limit: usize) -> Result<Vec<Place>> {
         )));
     }
 
-    let json: serde_json::Value = response_json(response)?;
+    let json: JsonValue = response_json(response)?;
     parse_nominatim(&json)
 }
 
-pub fn parse_nominatim(json: &serde_json::Value) -> Result<Vec<Place>> {
+pub fn parse_nominatim(json: &JsonValue) -> Result<Vec<Place>> {
     let array = json
         .as_array()
         .ok_or_else(|| WeatherError::ParseError("nominatim response not a list".into()))?;
@@ -118,7 +119,10 @@ pub fn parse_nominatim(json: &serde_json::Value) -> Result<Vec<Place>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+
+    fn sample_doc(raw: &str) -> JsonValue {
+        JsonValue::parse(raw).unwrap()
+    }
 
     #[test]
     fn encodes_queries() {
@@ -129,14 +133,14 @@ mod tests {
 
     #[test]
     fn parses_open_meteo_results() {
-        let sample = json!({
-            "results": [
+        let sample = sample_doc(
+            r#"{"results": [
                 {"name": "Berlin", "country": "Germany", "admin1": "Land Berlin",
                  "latitude": 52.52437, "longitude": 13.41053},
                 {"name": "Berlin", "country": "United States",
                  "latitude": 44.46867, "longitude": -71.18508}
-            ]
-        });
+            ]}"#,
+        );
 
         let places = parse_open_meteo(&sample).unwrap();
         assert_eq!(places.len(), 2);
@@ -145,18 +149,18 @@ mod tests {
         assert_eq!(places[0].region.as_deref(), Some("Land Berlin"));
         assert_eq!(places[1].latitude, 44.46867);
 
-        assert!(parse_open_meteo(&json!({})).unwrap().is_empty());
+        assert!(parse_open_meteo(&sample_doc("{}")).unwrap().is_empty());
     }
 
     #[test]
     fn parses_nominatim_results() {
-        let sample = json!([
-            {
+        let sample = sample_doc(
+            r#"[{
                 "display_name": "Berlin, Land Berlin, 10117, Deutschland",
                 "lat": "52.5170365",
                 "lon": "13.3888599"
-            }
-        ]);
+            }]"#,
+        );
 
         let places = parse_nominatim(&sample).unwrap();
         assert_eq!(places.len(), 1);
@@ -164,8 +168,8 @@ mod tests {
         assert_eq!(places[0].region.as_deref(), Some("10117"));
         assert!((places[0].latitude - 52.5170365).abs() < f64::EPSILON);
 
-        assert!(parse_nominatim(&json!({"error": "x"})).is_err());
-        assert!(parse_nominatim(&json!([]))
+        assert!(parse_nominatim(&sample_doc(r#"{"error": "x"}"#)).is_err());
+        assert!(parse_nominatim(&sample_doc("[]"))
             .map(|places| places.is_empty())
             .unwrap_or(false));
     }

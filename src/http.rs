@@ -9,7 +9,7 @@ fn client() -> HttpClient {
     HttpClient::with_user_agent(USER_AGENT).timeout(Duration::from_secs(TIMEOUT_SECS))
 }
 
-pub fn get_json(url: &str) -> Result<serde_json::Value> {
+pub fn get_json(url: &str) -> Result<foundation::serialization::JsonValue> {
     let response = client().get(url).send().map_err(map_network_error)?;
 
     if !response.is_success() {
@@ -31,12 +31,15 @@ pub fn get_json(url: &str) -> Result<serde_json::Value> {
 
 /// Parses a response body as JSON, mapping transport leftovers to network
 /// errors and bad payloads to parse errors.
-pub fn response_json(response: HttpResponse) -> Result<serde_json::Value> {
+pub fn response_json(
+    response: HttpResponse,
+) -> Result<foundation::serialization::JsonValue> {
     let text = response.text().map_err(|e| match e {
         networkkit::types::NetworkError::ParseError(msg) => WeatherError::ParseError(msg),
         other => WeatherError::NetworkError(other.to_string()),
     })?;
-    serde_json::from_str(&text).map_err(|e| WeatherError::ParseError(e.to_string()))
+    foundation::serialization::JsonValue::parse(&text)
+        .map_err(|e| WeatherError::ParseError(e.to_string()))
 }
 
 pub fn map_network_error(err: networkkit::types::NetworkError) -> WeatherError {

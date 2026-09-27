@@ -1,32 +1,22 @@
-use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 const EN_US: &str = include_str!("../lang/en_us.json");
 const DE_DE: &str = include_str!("../lang/de_de.json");
 
-#[derive(Deserialize)]
 struct Messages {
-    not_available: String,
-    permission_denied: String,
-    timeout: String,
-    network_error: String,
-    parse_error: String,
-    provider_failed: String,
-    location_failed: String,
+    map: HashMap<String, String>,
 }
 
 impl Messages {
+    fn parse(raw: &str) -> Self {
+        let map = foundation::serialization::JSONSerialization::parse_flat_string_map(raw)
+            .expect("built-in language file is invalid");
+        Self { map }
+    }
+
     fn get(&self, key: &str) -> Option<&str> {
-        match key {
-            "not_available" => Some(&self.not_available),
-            "permission_denied" => Some(&self.permission_denied),
-            "timeout" => Some(&self.timeout),
-            "network_error" => Some(&self.network_error),
-            "parse_error" => Some(&self.parse_error),
-            "provider_failed" => Some(&self.provider_failed),
-            "location_failed" => Some(&self.location_failed),
-            _ => None,
-        }
+        self.map.get(key).map(String::as_str)
     }
 }
 
@@ -51,7 +41,7 @@ fn messages() -> &'static Messages {
             "de_de" => DE_DE,
             _ => EN_US,
         };
-        serde_json::from_str(raw).expect("built-in language file is invalid")
+        Messages::parse(raw)
     })
 }
 
@@ -72,10 +62,10 @@ mod tests {
 
     #[test]
     fn builtin_files_parse() {
-        let en: Messages = serde_json::from_str(EN_US).expect("en_us.json invalid");
-        let de: Messages = serde_json::from_str(DE_DE).expect("de_de.json invalid");
-        assert!(!en.not_available.is_empty());
-        assert_ne!(en.not_available, de.not_available);
+        let en = Messages::parse(EN_US);
+        let de = Messages::parse(DE_DE);
+        assert!(!en.get("not_available").unwrap_or_default().is_empty());
+        assert_ne!(en.get("not_available"), de.get("not_available"));
     }
 
     #[test]

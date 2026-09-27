@@ -2,11 +2,12 @@ use crate::http::get_json;
 use crate::types::{
     CurrentWeather, ForecastDay, HourPoint, MarineConditions, Result, WeatherError,
 };
+use foundation::serialization::JsonValue;
 
 const LOCATIONFORECAST: &str = "https://api.met.no/weatherapi/locationforecast/2.0/compact";
 const OCEANFORECAST: &str = "https://api.met.no/weatherapi/oceanforecast/2.0/compact";
 
-fn details(entry: &serde_json::Value) -> Option<&serde_json::Value> {
+fn details(entry: &JsonValue) -> Option<&JsonValue> {
     entry.get("data")?.get("instant")?.get("details")
 }
 
@@ -32,16 +33,16 @@ pub fn fetch_marine(lat: f64, lon: f64) -> Result<MarineConditions> {
     parse_marine(&json)
 }
 
-fn timeseries(json: &serde_json::Value) -> Result<Vec<serde_json::Value>> {
+fn timeseries(json: &JsonValue) -> Result<Vec<&JsonValue>> {
     json.get("properties")
         .and_then(|p| p.get("timeseries"))
         .and_then(|v| v.as_array())
-        .cloned()
+        .map(|items| items.iter().collect())
         .ok_or_else(|| WeatherError::ParseError("met.no response missing timeseries".into()))
 }
 
 /// Parses the compact locationforecast into hourly points.
-pub fn parse_hourly(json: &serde_json::Value, limit: usize) -> Result<Vec<HourPoint>> {
+pub fn parse_hourly(json: &JsonValue, limit: usize) -> Result<Vec<HourPoint>> {
     let series = timeseries(json)?;
     let mut points = Vec::with_capacity(limit);
 
@@ -87,7 +88,7 @@ pub fn parse_hourly(json: &serde_json::Value, limit: usize) -> Result<Vec<HourPo
 }
 
 /// Aggregates the compact locationforecast into calendar days.
-pub fn parse_daily(json: &serde_json::Value, limit: usize) -> Result<Vec<ForecastDay>> {
+pub fn parse_daily(json: &JsonValue, limit: usize) -> Result<Vec<ForecastDay>> {
     use std::collections::BTreeMap;
 
     let series = timeseries(json)?;
@@ -174,7 +175,7 @@ impl DayBucket {
 }
 
 /// Parses an oceanforecast response into marine conditions.
-pub fn parse_marine(json: &serde_json::Value) -> Result<MarineConditions> {
+pub fn parse_marine(json: &JsonValue) -> Result<MarineConditions> {
     let series = timeseries(json)?;
     let entry = series.first().ok_or_else(|| {
         WeatherError::ParseError("oceanforecast has no timeseries entries".into())
@@ -186,11 +187,10 @@ pub fn parse_marine(json: &serde_json::Value) -> Result<MarineConditions> {
     };
 
     let field = |key: &str| -> Option<f64> {
-        match details.get(key) {
-            Some(serde_json::Value::Number(n)) => n.as_f64(),
-            Some(other) => other.get("value").and_then(|v| v.as_f64()),
-            None => None,
-        }
+        let value = details.get(key)?;
+        value
+            .as_f64()
+            .or_else(|| value.get("value").and_then(|v| v.as_f64()))
     };
 
     Ok(MarineConditions {
@@ -234,11 +234,14 @@ pub fn fetch_current_degraded(lat: f64, lon: f64) -> Result<CurrentWeather> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    fn sample() -> serde_json::Value {
-        json!({
-            "properties": {
+    fn sample_doc(raw: &str) -> JsonValue {
+        JsonValue::parse(raw).unwrap()
+    }
+
+    fn sample() -> JsonValue {
+        sample_doc(
+            r#"{"properties": {
                 "timeseries": [
                     {
                         "time": "2026-08-24T11:00:00Z",
@@ -286,8 +289,8 @@ mod tests {
                         }
                     }
                 ]
-            }
-        })
+            }}"#,
+        )
     }
 
     #[test]
@@ -320,14 +323,14 @@ mod tests {
 
     #[test]
     fn rejects_broken_series() {
-        assert!(parse_hourly(&json!({}), 2).is_err());
-        assert!(parse_daily(&json!({"properties": {}}), 2).is_err());
+        assert!(parse_hourly(&sample_doc("{}"), 2).is_err());
+        assert!(parse_daily(&sample_doc(r#"{"properties": {}}"#), 2).is_err());
     }
 
     #[test]
     fn parses_ocean() {
-        let sample = json!({
-            "properties": {
+        let sample = sample_doc(
+            r#"{"properties": {
                 "timeseries": [{
                     "time": "2026-08-24T12:00:00Z",
                     "data": { "instant": { "details": {
@@ -337,14 +340,14 @@ mod tests {
                         "sea_surface_swell_wave_height": 0.8
                     }}}
                 }]
-            }
-        });
+            }}"#,
+        );
 
         let marine = parse_marine(&sample).unwrap();
         assert_eq!(marine.wave_height_m, Some(1.2));
         assert_eq!(marine.wave_direction_deg, Some(245));
         assert_eq!(marine.source, "MET Norway Ocean");
 
-        assert!(parse_marine(&json!({"properties": {"timeseries": []}})).is_err());
+        assert!(parse_marine(&sample_doc(r#"{"properties": {"timeseries": []}}"#)).is_err());
     }
 }

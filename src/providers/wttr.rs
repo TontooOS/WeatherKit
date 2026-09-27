@@ -1,5 +1,6 @@
 use crate::http::get_json;
 use crate::types::{CurrentWeather, Result, WeatherError};
+use foundation::serialization::JsonValue;
 
 /// wttr.in is the fallback source for current conditions.
 pub fn fetch_current(lat: f64, lon: f64) -> Result<CurrentWeather> {
@@ -9,7 +10,7 @@ pub fn fetch_current(lat: f64, lon: f64) -> Result<CurrentWeather> {
 }
 
 /// Parses a wttr.in `format=j1` response.
-pub fn parse_current(json: &serde_json::Value) -> Result<CurrentWeather> {
+pub fn parse_current(json: &JsonValue) -> Result<CurrentWeather> {
     let condition = json
         .get("current_condition")
         .and_then(|v| v.as_array())
@@ -52,12 +53,15 @@ pub fn parse_current(json: &serde_json::Value) -> Result<CurrentWeather> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+
+    fn sample_doc(raw: &str) -> JsonValue {
+        JsonValue::parse(raw).unwrap()
+    }
 
     #[test]
     fn parses_j1_current() {
-        let sample = json!({
-            "current_condition": [{
+        let sample = sample_doc(
+            r#"{"current_condition": [{
                 "temp_C": "24",
                 "FeelsLikeC": "26",
                 "humidity": "48",
@@ -70,8 +74,8 @@ mod tests {
                 "winddirDegree": "212",
                 "weatherDesc": [{"value": "Partly cloudy"}]
             }],
-            "weather": []
-        });
+            "weather": []}"#,
+        );
 
         let weather = parse_current(&sample).unwrap();
         assert_eq!(weather.temperature_c, 24.0);
@@ -89,7 +93,7 @@ mod tests {
 
     #[test]
     fn rejects_broken_j1() {
-        assert!(parse_current(&json!({})).is_err());
-        assert!(parse_current(&json!({"current_condition": [{}]})).is_err());
+        assert!(parse_current(&sample_doc("{}")).is_err());
+        assert!(parse_current(&sample_doc(r#"{"current_condition": [{}]}"#)).is_err());
     }
 }

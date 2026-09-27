@@ -6,7 +6,7 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_double};
 
-use serde_json::{json, Value};
+use foundation::serialization::JsonValue;
 
 fn set_error(error_out: *mut *mut c_char, message: &str) {
     if error_out.is_null() {
@@ -17,66 +17,98 @@ fn set_error(error_out: *mut *mut c_char, message: &str) {
     }
 }
 
-fn json_ptr(value: &Value) -> *mut c_char {
-    CString::new(value.to_string())
-        .unwrap_or_default()
-        .into_raw()
+fn json_ptr(json: &str) -> *mut c_char {
+    CString::new(json).unwrap_or_default().into_raw()
 }
 
-fn weather_json(weather: &crate::types::CurrentWeather) -> Value {
-    json!({
-        "temperature_c": weather.temperature_c,
-        "feels_like_c": weather.feels_like_c,
-        "humidity_pct": weather.humidity_pct,
-        "pressure_hpa": weather.pressure_hpa,
-        "wind_kmh": weather.wind_kmh,
-        "wind_direction_deg": weather.wind_direction_deg,
-        "wind_gusts_kmh": weather.wind_gusts_kmh,
-        "precipitation_mm": weather.precipitation_mm,
-        "cloud_cover_pct": weather.cloud_cover_pct,
-        "visibility_m": weather.visibility_m,
-        "uv_index": weather.uv_index,
-        "is_day": weather.is_day,
-        "weather_code": weather.weather_code,
-        "condition": weather.condition,
-        "source": weather.source,
-    })
+fn opt_i32(value: Option<i32>) -> JsonValue {
+    match value {
+        Some(v) => JsonValue::Integer(v as i64),
+        None => JsonValue::Null,
+    }
 }
 
-fn forecast_json(day: &crate::types::ForecastDay) -> Value {
-    json!({
-        "date": day.date,
-        "temp_max_c": day.temp_max_c,
-        "temp_min_c": day.temp_min_c,
-        "precipitation_mm": day.precipitation_mm,
-        "precip_probability_pct": day.precip_probability_pct,
-        "wind_max_kmh": day.wind_max_kmh,
-        "weather_code": day.weather_code,
-        "sunrise_utc": day.sunrise_utc,
-        "sunset_utc": day.sunset_utc,
-    })
+fn opt_f64(value: Option<f64>) -> JsonValue {
+    match value {
+        Some(v) => JsonValue::Float(v),
+        None => JsonValue::Null,
+    }
 }
 
-fn alert_json(alert: &crate::types::WeatherAlert) -> Value {
-    json!({
-        "headline": alert.headline,
-        "description": alert.description,
-        "severity": alert.severity.as_str(),
-        "kind": alert.kind,
-        "source": alert.source,
-        "effective": alert.effective,
-        "expires": alert.expires,
-        "should_notify": alert.should_notify(),
-    })
+fn opt_string(value: &Option<String>) -> JsonValue {
+    match value {
+        Some(text) => JsonValue::Str(text.clone()),
+        None => JsonValue::Null,
+    }
 }
 
-fn minutely_json(point: &crate::types::MinutePoint) -> Value {
-    json!({
-        "time": point.time,
-        "precipitation_mm": point.precipitation_mm,
-        "precip_probability_pct": point.precip_probability_pct,
-        "temperature_c": point.temperature_c,
-    })
+fn weather_json(weather: &crate::types::CurrentWeather) -> String {
+    JsonValue::Object(vec![
+        ("temperature_c".to_string(), JsonValue::Float(weather.temperature_c)),
+        ("feels_like_c".to_string(), JsonValue::Float(weather.feels_like_c)),
+        ("humidity_pct".to_string(), JsonValue::Integer(weather.humidity_pct as i64)),
+        ("pressure_hpa".to_string(), JsonValue::Float(weather.pressure_hpa)),
+        ("wind_kmh".to_string(), JsonValue::Float(weather.wind_kmh)),
+        (
+            "wind_direction_deg".to_string(),
+            JsonValue::Integer(weather.wind_direction_deg as i64),
+        ),
+        ("wind_gusts_kmh".to_string(), opt_f64(weather.wind_gusts_kmh)),
+        ("precipitation_mm".to_string(), JsonValue::Float(weather.precipitation_mm)),
+        ("cloud_cover_pct".to_string(), opt_i32(weather.cloud_cover_pct)),
+        ("visibility_m".to_string(), opt_f64(weather.visibility_m)),
+        ("uv_index".to_string(), opt_f64(weather.uv_index)),
+        ("is_day".to_string(), JsonValue::Bool(weather.is_day)),
+        ("weather_code".to_string(), opt_i32(weather.weather_code)),
+        ("condition".to_string(), JsonValue::Str(weather.condition.clone())),
+        ("source".to_string(), JsonValue::Str(weather.source.clone())),
+    ])
+    .stringify(false)
+}
+
+fn forecast_json(day: &crate::types::ForecastDay) -> String {
+    JsonValue::Object(vec![
+        ("date".to_string(), JsonValue::Str(day.date.clone())),
+        ("temp_max_c".to_string(), JsonValue::Float(day.temp_max_c)),
+        ("temp_min_c".to_string(), JsonValue::Float(day.temp_min_c)),
+        ("precipitation_mm".to_string(), opt_f64(day.precipitation_mm)),
+        (
+            "precip_probability_pct".to_string(),
+            opt_i32(day.precip_probability_pct),
+        ),
+        ("wind_max_kmh".to_string(), JsonValue::Float(day.wind_max_kmh)),
+        ("weather_code".to_string(), opt_i32(day.weather_code)),
+        ("sunrise_utc".to_string(), opt_string(&day.sunrise_utc)),
+        ("sunset_utc".to_string(), opt_string(&day.sunset_utc)),
+    ])
+    .stringify(false)
+}
+
+fn alert_json(alert: &crate::types::WeatherAlert) -> String {
+    JsonValue::Object(vec![
+        ("headline".to_string(), JsonValue::Str(alert.headline.clone())),
+        ("description".to_string(), JsonValue::Str(alert.description.clone())),
+        ("severity".to_string(), JsonValue::Str(alert.severity.as_str().to_string())),
+        ("kind".to_string(), JsonValue::Str(alert.kind.clone())),
+        ("source".to_string(), JsonValue::Str(alert.source.clone())),
+        ("effective".to_string(), opt_string(&alert.effective)),
+        ("expires".to_string(), opt_string(&alert.expires)),
+        ("should_notify".to_string(), JsonValue::Bool(alert.should_notify())),
+    ])
+    .stringify(false)
+}
+
+fn minutely_json(point: &crate::types::MinutePoint) -> String {
+    JsonValue::Object(vec![
+        ("time".to_string(), JsonValue::Str(point.time.clone())),
+        ("precipitation_mm".to_string(), JsonValue::Float(point.precipitation_mm)),
+        (
+            "precip_probability_pct".to_string(),
+            opt_i32(point.precip_probability_pct),
+        ),
+        ("temperature_c".to_string(), opt_f64(point.temperature_c)),
+    ])
+    .stringify(false)
 }
 
 /// The framework version as a static C string.
@@ -131,9 +163,10 @@ pub unsafe extern "C" fn tontoo_weatherkit_weekly_forecast(
     error_out: *mut *mut c_char,
 ) -> *mut c_char {
     match crate::weekly_forecast() {
-        Ok(days) => json_ptr(&Value::Array(
-            days.iter().map(forecast_json).collect(),
-        )),
+        Ok(days) => {
+            let items: Vec<String> = days.iter().map(forecast_json).collect();
+            json_ptr(&format!("[{}]", items.join(",")))
+        }
         Err(_) => {
             set_error(error_out, "forecast unavailable");
             std::ptr::null_mut()
@@ -151,9 +184,10 @@ pub unsafe extern "C" fn tontoo_weatherkit_active_alerts(
     error_out: *mut *mut c_char,
 ) -> *mut c_char {
     match crate::WeatherKit::new().active_alerts() {
-        Ok(alerts) => json_ptr(&Value::Array(
-            alerts.iter().map(alert_json).collect(),
-        )),
+        Ok(alerts) => {
+            let items: Vec<String> = alerts.iter().map(alert_json).collect();
+            json_ptr(&format!("[{}]", items.join(",")))
+        }
         Err(_) => {
             set_error(error_out, "alerts unavailable");
             std::ptr::null_mut()
@@ -171,9 +205,10 @@ pub unsafe extern "C" fn tontoo_weatherkit_minutely_precipitation(
     error_out: *mut *mut c_char,
 ) -> *mut c_char {
     match crate::WeatherKit::new().minutely_precipitation(60) {
-        Ok(points) => json_ptr(&Value::Array(
-            points.iter().map(minutely_json).collect(),
-        )),
+        Ok(points) => {
+            let items: Vec<String> = points.iter().map(minutely_json).collect();
+            json_ptr(&format!("[{}]", items.join(",")))
+        }
         Err(_) => {
             set_error(error_out, "minutely forecast unavailable");
             std::ptr::null_mut()

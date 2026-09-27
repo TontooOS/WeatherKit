@@ -1,5 +1,6 @@
 use crate::http::get_json;
 use crate::types::{AirQuality, AirQualityPoint, PollenLevels, Result, WeatherError};
+use foundation::serialization::JsonValue;
 
 pub const AIR_API: &str = "https://air-quality-api.open-meteo.com/v1/air-quality";
 
@@ -37,7 +38,7 @@ pub fn forecast_url(lat: f64, lon: f64, domain: &str, days: u8) -> String {
 }
 
 /// Parses hourly AQI arrays into [`AirQualityPoint`] values.
-pub fn parse_forecast(json: &serde_json::Value, limit: usize) -> Result<Vec<AirQualityPoint>> {
+pub fn parse_forecast(json: &JsonValue, limit: usize) -> Result<Vec<AirQualityPoint>> {
     let hourly = json
         .get("hourly")
         .ok_or_else(|| WeatherError::ParseError("air-quality response missing hourly".into()))?;
@@ -100,16 +101,16 @@ pub fn fetch_forecast(lat: f64, lon: f64, hours: usize) -> Result<Vec<AirQuality
     }
 }
 
-fn num(value: &serde_json::Value, key: &str) -> Option<f64> {
+fn num(value: &JsonValue, key: &str) -> Option<f64> {
     value.get(key)?.as_f64()
 }
 
-fn int(value: &serde_json::Value, key: &str) -> Option<i32> {
+fn int(value: &JsonValue, key: &str) -> Option<i32> {
     value.get(key)?.as_i64().map(|v| v as i32)
 }
 
 /// Parses an air-quality response.
-pub fn parse(json: &serde_json::Value, source: &str) -> Result<AirQuality> {
+pub fn parse(json: &JsonValue, source: &str) -> Result<AirQuality> {
     let current = json
         .get("current")
         .ok_or_else(|| WeatherError::ParseError("air-quality response missing current".into()))?;
@@ -138,7 +139,10 @@ pub fn parse(json: &serde_json::Value, source: &str) -> Result<AirQuality> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+
+    fn sample_doc(raw: &str) -> JsonValue {
+        JsonValue::parse(raw).unwrap()
+    }
 
     #[test]
     fn builds_urls() {
@@ -157,8 +161,8 @@ mod tests {
 
     #[test]
     fn parses_air_quality() {
-        let sample = json!({
-            "current": {
+        let sample = sample_doc(
+            r#"{"current": {
                 "european_aqi": 32,
                 "us_aqi": 41,
                 "pm10": 12.4,
@@ -173,8 +177,8 @@ mod tests {
                 "mugwort_pollen": null,
                 "olive_pollen": null,
                 "ragweed_pollen": 0.4
-            }
-        });
+            }}"#,
+        );
 
         let air = parse(&sample, "CAMS Europe").unwrap();
         assert_eq!(air.european_aqi, Some(32));
@@ -188,21 +192,21 @@ mod tests {
 
     #[test]
     fn rejects_broken_air_quality() {
-        assert!(parse(&json!({}), "x").is_err());
+        assert!(parse(&sample_doc("{}"), "x").is_err());
     }
 
     #[test]
     fn parses_aqi_forecast() {
-        let sample = json!({
-            "hourly": {
+        let sample = sample_doc(
+            r#"{"hourly": {
                 "time": ["2026-08-24T12:00", "2026-08-24T13:00"],
                 "european_aqi": [32, 45],
                 "us_aqi": [41, 55],
                 "pm2_5": [7.1, 9.4],
                 "pm10": [12.4, 15.0],
                 "ozone": [68.3, 71.2]
-            }
-        });
+            }}"#,
+        );
 
         let points = parse_forecast(&sample, 5).unwrap();
         assert_eq!(points.len(), 2);
@@ -210,6 +214,6 @@ mod tests {
         assert_eq!(points[1].us_aqi, Some(55));
         assert_eq!(points[1].pm2_5, Some(9.4));
 
-        assert!(parse_forecast(&json!({}), 2).is_err());
+        assert!(parse_forecast(&sample_doc("{}"), 2).is_err());
     }
 }

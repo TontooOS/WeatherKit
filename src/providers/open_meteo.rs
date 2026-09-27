@@ -3,6 +3,7 @@ use crate::types::{
     weather_code_description, CurrentWeather, ForecastDay, HistoricalDay, HourPoint,
     MarineConditions, MinutePoint, Result, WeatherError,
 };
+use foundation::serialization::JsonValue;
 
 pub const FORECAST_API: &str = "https://api.open-meteo.com/v1/forecast";
 pub const ARCHIVE_API: &str = "https://archive-api.open-meteo.com/v1/archive";
@@ -12,11 +13,11 @@ const CURRENT_FIELDS: &str = "temperature_2m,apparent_temperature,relative_humid
 surface_pressure,pressure_msl,precipitation,weather_code,cloud_cover,wind_speed_10m,\
 wind_direction_10m,wind_gusts_10m,is_day,uv_index";
 
-fn num(value: &serde_json::Value, key: &str) -> Option<f64> {
+fn num(value: &JsonValue, key: &str) -> Option<f64> {
     value.get(key)?.as_f64()
 }
 
-fn int(value: &serde_json::Value, key: &str) -> Option<i32> {
+fn int(value: &JsonValue, key: &str) -> Option<i32> {
     value.get(key)?.as_i64().map(|v| v as i32)
 }
 
@@ -29,7 +30,7 @@ pub fn current_url(lat: f64, lon: f64) -> String {
 }
 
 /// Parses an Open-Meteo forecast response containing a `current` object.
-pub fn parse_current(json: &serde_json::Value, source: &str) -> Result<CurrentWeather> {
+pub fn parse_current(json: &JsonValue, source: &str) -> Result<CurrentWeather> {
     let current = json.get("current").ok_or_else(|| {
         WeatherError::ParseError("open-meteo response missing current".into())
     })?;
@@ -81,7 +82,7 @@ wind_speed_10m_max,weather_code,sunrise,sunset\
 }
 
 /// Parses hourly arrays into [`HourPoint`] values.
-pub fn parse_hourly(json: &serde_json::Value, limit: usize) -> Result<Vec<HourPoint>> {
+pub fn parse_hourly(json: &JsonValue, limit: usize) -> Result<Vec<HourPoint>> {
     let hourly = json
         .get("hourly")
         .ok_or_else(|| WeatherError::ParseError("missing hourly block".into()))?;
@@ -135,7 +136,7 @@ pub fn fetch_hourly(lat: f64, lon: f64, hours: usize) -> Result<Vec<HourPoint>> 
 }
 
 /// Parses daily arrays into [`ForecastDay`] values.
-pub fn parse_daily(json: &serde_json::Value, limit: usize) -> Result<Vec<ForecastDay>> {
+pub fn parse_daily(json: &JsonValue, limit: usize) -> Result<Vec<ForecastDay>> {
     let daily = json
         .get("daily")
         .ok_or_else(|| WeatherError::ParseError("missing daily block".into()))?;
@@ -217,7 +218,7 @@ pub fn minutely_url(lat: f64, lon: f64) -> String {
 }
 
 /// Parses `minutely_15` arrays into [`MinutePoint`] values.
-pub fn parse_minutely(json: &serde_json::Value, limit: usize) -> Result<Vec<MinutePoint>> {
+pub fn parse_minutely(json: &JsonValue, limit: usize) -> Result<Vec<MinutePoint>> {
     let block = json
         .get("minutely_15")
         .ok_or_else(|| WeatherError::ParseError("missing minutely_15 block".into()))?;
@@ -271,7 +272,7 @@ pub fn archive_url(lat: f64, lon: f64, start_date: &str, end_date: &str) -> Stri
 }
 
 /// Parses archive responses into [`HistoricalDay`] values.
-pub fn parse_archive(json: &serde_json::Value) -> Result<Vec<HistoricalDay>> {
+pub fn parse_archive(json: &JsonValue) -> Result<Vec<HistoricalDay>> {
     let daily = json
         .get("daily")
         .ok_or_else(|| WeatherError::ParseError("missing daily block".into()))?;
@@ -325,7 +326,7 @@ pub fn fetch_marine(lat: f64, lon: f64) -> Result<MarineConditions> {
 }
 
 /// Parses a marine API response.
-pub fn parse_marine(json: &serde_json::Value, source: &str) -> Result<MarineConditions> {
+pub fn parse_marine(json: &JsonValue, source: &str) -> Result<MarineConditions> {
     let current = json
         .get("current")
         .ok_or_else(|| WeatherError::ParseError("marine response missing current".into()))?;
@@ -342,7 +343,10 @@ pub fn parse_marine(json: &serde_json::Value, source: &str) -> Result<MarineCond
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+
+    fn sample_doc(raw: &str) -> JsonValue {
+        JsonValue::parse(raw).unwrap()
+    }
 
     #[test]
     fn builds_urls() {
@@ -364,8 +368,8 @@ mod tests {
 
     #[test]
     fn parses_current() {
-        let sample = json!({
-            "current": {
+        let sample = sample_doc(
+            r#"{"current": {
                 "time": "2026-08-24T12:00",
                 "temperature_2m": 24.3,
                 "apparent_temperature": 25.9,
@@ -379,8 +383,8 @@ mod tests {
                 "wind_gusts_10m": 27.4,
                 "is_day": 1,
                 "uv_index": 4.85
-            }
-        });
+            }}"#,
+        );
 
         let weather = parse_current(&sample, "Open-Meteo").unwrap();
         assert_eq!(weather.temperature_c, 24.3);
@@ -401,22 +405,22 @@ mod tests {
 
     #[test]
     fn rejects_broken_current() {
-        assert!(parse_current(&json!({}), "x").is_err());
-        assert!(parse_current(&json!({"current": {}}), "x").is_err());
+        assert!(parse_current(&sample_doc("{}"), "x").is_err());
+        assert!(parse_current(&sample_doc(r#"{"current": {}}"#), "x").is_err());
     }
 
     #[test]
     fn parses_hourly_arrays() {
-        let sample = json!({
-            "hourly": {
+        let sample = sample_doc(
+            r#"{"hourly": {
                 "time": ["2026-08-24T00:00", "2026-08-24T01:00", "2026-08-24T02:00"],
                 "temperature_2m": [18.1, 17.4, 16.9],
                 "precipitation": [0.0, 0.4, 1.1],
                 "precipitation_probability": [5, 40, 80],
                 "wind_speed_10m": [9.2, 10.1, 12.0],
                 "weather_code": [1, 61, 63]
-            }
-        });
+            }}"#,
+        );
 
         let hours = parse_hourly(&sample, 2).unwrap();
         assert_eq!(hours.len(), 2);
@@ -424,13 +428,13 @@ mod tests {
         assert_eq!(hours[1].precip_probability_pct, Some(40));
         assert_eq!(hours[1].weather_code, Some(61));
 
-        assert!(parse_hourly(&json!({}), 2).is_err());
+        assert!(parse_hourly(&sample_doc("{}"), 2).is_err());
     }
 
     #[test]
     fn parses_daily_arrays() {
-        let sample = json!({
-            "daily": {
+        let sample = sample_doc(
+            r#"{"daily": {
                 "time": ["2026-08-24", "2026-08-25"],
                 "temperature_2m_max": [28.4, 26.1],
                 "temperature_2m_min": [15.2, 14.8],
@@ -440,8 +444,8 @@ mod tests {
                 "weather_code": [1, 95],
                 "sunrise": ["2026-08-24T04:43", "2026-08-25T04:44"],
                 "sunset": ["2026-08-24T20:41", "2026-08-25T20:39"]
-            }
-        });
+            }}"#,
+        );
 
         let days = parse_daily(&sample, 5).unwrap();
         assert_eq!(days.len(), 2);
@@ -449,20 +453,20 @@ mod tests {
         assert_eq!(days[1].weather_code, Some(95));
         assert_eq!(days[1].sunrise_utc.as_deref(), Some("2026-08-25T04:44"));
 
-        assert!(parse_daily(&json!({}), 5).is_err());
+        assert!(parse_daily(&sample_doc("{}"), 5).is_err());
     }
 
     #[test]
     fn parses_minutely_arrays() {
-        let sample = json!({
-            "minutely_15": {
+        let sample = sample_doc(
+            r#"{"minutely_15": {
                 "time": ["2026-08-24T12:00", "2026-08-24T12:15", "2026-08-24T12:30"],
                 "temperature_2m": [24.3, 24.1, 23.8],
                 "precipitation": [0.0, 0.4, 1.1],
                 "precipitation_probability": [5, 40, 80],
                 "weather_code": [1, 61, 63]
-            }
-        });
+            }}"#,
+        );
 
         let points = parse_minutely(&sample, 2).unwrap();
         assert_eq!(points.len(), 2);
@@ -471,7 +475,7 @@ mod tests {
         assert_eq!(points[0].temperature_c, Some(24.3));
         assert_eq!(points[1].precip_probability_pct, Some(40));
 
-        assert!(parse_minutely(&json!({}), 2).is_err());
+        assert!(parse_minutely(&sample_doc("{}"), 2).is_err());
     }
 
     #[test]
@@ -484,14 +488,14 @@ mod tests {
 
     #[test]
     fn parses_archive() {
-        let sample = json!({
-            "daily": {
+        let sample = sample_doc(
+            r#"{"daily": {
                 "time": ["2026-07-01", "2026-07-02"],
                 "temperature_2m_max": [31.2, null],
                 "temperature_2m_min": [19.4, 18.0],
                 "precipitation_sum": [null, 12.5]
-            }
-        });
+            }}"#,
+        );
 
         let days = parse_archive(&sample).unwrap();
         assert_eq!(days.len(), 2);
@@ -503,21 +507,21 @@ mod tests {
 
     #[test]
     fn parses_marine() {
-        let sample = json!({
-            "current": {
+        let sample = sample_doc(
+            r#"{"current": {
                 "time": "2026-08-24T12:00",
                 "wave_height": 1.34,
                 "wave_direction": 245,
                 "wave_period": 6.8,
                 "swell_wave_height": 0.92
-            }
-        });
+            }}"#,
+        );
 
         let marine = parse_marine(&sample, "Open-Meteo Marine").unwrap();
         assert_eq!(marine.wave_height_m, Some(1.34));
         assert_eq!(marine.wave_direction_deg, Some(245));
         assert_eq!(marine.wave_period_s, Some(6.8));
         assert_eq!(marine.swell_height_m, Some(0.92));
-        assert!(parse_marine(&json!({}), "x").is_err());
+        assert!(parse_marine(&sample_doc("{}"), "x").is_err());
     }
 }

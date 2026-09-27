@@ -87,7 +87,7 @@ answer stays correct even when wttr.in (which has no night flag) answered.
 pub async fn current_weather_async(&self) -> Result<CurrentWeather>
 ```
 
-Runs the blocking chain inside `tokio::task::spawn_blocking`.
+Runs the blocking chain inside `foundation::async_runtime::spawn_blocking`.
 
 ## Usage / Example
 

@@ -2,6 +2,7 @@ use crate::http::get_json;
 use crate::types::{
     AlertSeverity, CurrentWeather, ForecastDay, HourPoint, Result, WeatherAlert, WeatherError,
 };
+use foundation::serialization::JsonValue;
 
 const METALERTS: &str = "https://api.met.no/weatherapi/metalerts/2.0/current.json";
 
@@ -9,7 +10,7 @@ fn alerts_url(lat: f64, lon: f64) -> String {
     format!("{}?lat={:.4}&lon={:.4}", METALERTS, lat, lon)
 }
 
-fn str_field(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+fn str_field(value: &JsonValue, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(text) = value.get(*key).and_then(|v| v.as_str()) {
             if !text.is_empty() {
@@ -25,7 +26,7 @@ fn str_field(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
 /// Tolerant by design: unknown shapes yield an empty list instead of an error
 /// because alerts are advisory data, and an empty list outside Europe (where
 /// MetAlerts has no coverage) is a valid answer.
-pub fn parse_metalerts(json: &serde_json::Value) -> Vec<WeatherAlert> {
+pub fn parse_metalerts(json: &JsonValue) -> Vec<WeatherAlert> {
     let empty = Vec::new();
     let features = json
         .get("features")
@@ -251,7 +252,10 @@ pub fn synthesize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+
+    fn sample_doc(raw: &str) -> JsonValue {
+        JsonValue::parse(raw).unwrap()
+    }
 
     fn calm_current() -> CurrentWeather {
         CurrentWeather {
@@ -265,8 +269,8 @@ mod tests {
 
     #[test]
     fn parses_metalerts_features() {
-        let sample = json!({
-            "features": [
+        let sample = sample_doc(
+            r#"{"features": [
                 {"properties": {
                     "event": "Strong wind",
                     "severity": "moderate",
@@ -276,8 +280,8 @@ mod tests {
                 }},
                 {"properties": {"nope": true}},
                 {}
-            ]
-        });
+            ]}"#,
+        );
 
         let alerts = parse_metalerts(&sample);
         assert_eq!(alerts.len(), 1);
@@ -289,8 +293,8 @@ mod tests {
 
     #[test]
     fn empty_outside_coverage() {
-        assert!(parse_metalerts(&json!({})).is_empty());
-        assert!(parse_metalerts(&json!({"features": []})).is_empty());
+        assert!(parse_metalerts(&sample_doc("{}")).is_empty());
+        assert!(parse_metalerts(&sample_doc(r#"{"features": []}"#)).is_empty());
     }
 
     #[test]

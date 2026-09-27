@@ -431,42 +431,42 @@ impl WeatherKit {
 
     pub async fn current_weather_async(&self) -> Result<CurrentWeather> {
         let this = self.clone();
-        tokio::task::spawn_blocking(move || this.current_weather())
+        foundation::async_runtime::spawn_blocking(move || this.current_weather())
             .await
             .map_err(join_error)?
     }
 
     pub async fn daily_forecast_async(&self, days: usize) -> Result<Vec<ForecastDay>> {
         let this = self.clone();
-        tokio::task::spawn_blocking(move || this.daily_forecast(days))
+        foundation::async_runtime::spawn_blocking(move || this.daily_forecast(days))
             .await
             .map_err(join_error)?
     }
 
     pub async fn minutely_precipitation_async(&self, minutes: usize) -> Result<Vec<MinutePoint>> {
         let this = self.clone();
-        tokio::task::spawn_blocking(move || this.minutely_precipitation(minutes))
+        foundation::async_runtime::spawn_blocking(move || this.minutely_precipitation(minutes))
             .await
             .map_err(join_error)?
     }
 
     pub async fn active_alerts_async(&self) -> Result<Vec<WeatherAlert>> {
         let this = self.clone();
-        tokio::task::spawn_blocking(move || this.active_alerts())
+        foundation::async_runtime::spawn_blocking(move || this.active_alerts())
             .await
             .map_err(join_error)?
     }
 
     pub async fn air_quality_forecast_async(&self, hours: usize) -> Result<Vec<AirQualityPoint>> {
         let this = self.clone();
-        tokio::task::spawn_blocking(move || this.air_quality_forecast(hours))
+        foundation::async_runtime::spawn_blocking(move || this.air_quality_forecast(hours))
             .await
             .map_err(join_error)?
     }
 
     pub async fn air_quality_async(&self) -> Result<AirQuality> {
         let this = self.clone();
-        tokio::task::spawn_blocking(move || this.air_quality())
+        foundation::async_runtime::spawn_blocking(move || this.air_quality())
             .await
             .map_err(join_error)?
     }
@@ -474,13 +474,13 @@ impl WeatherKit {
     pub async fn weather_for_place_async(&self, query: &str) -> Result<CurrentWeather> {
         let this = self.clone();
         let query = query.to_string();
-        tokio::task::spawn_blocking(move || this.weather_for_place(&query))
+        foundation::async_runtime::spawn_blocking(move || this.weather_for_place(&query))
             .await
             .map_err(join_error)?
     }
 }
 
-fn join_error(err: tokio::task::JoinError) -> WeatherError {
+fn join_error(err: foundation::async_runtime::JoinError) -> WeatherError {
     WeatherError::NetworkError(err.to_string())
 }
 
