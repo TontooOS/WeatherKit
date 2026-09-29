@@ -6,7 +6,7 @@ backed by a fallback source, with location coming only from CoreLocation.
 
 - Repository: https://github.com/TontooOS/Libs
 - License: TCL
-- Version: 26.1.0
+- Version: 27.0.0
 
 ## Feature Index
 
